@@ -1,6 +1,7 @@
 # __Author__:Zcc
 import numpy as np
 
+
 class BaseEstimator(object):
     X = None
     y = None
