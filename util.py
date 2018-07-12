@@ -106,7 +106,13 @@ def ks_score(y_true, y_predict, plot=False):
     return max(bad_rate_curve - good_rate_curve)
 
 
-
+def convert_col_index(X, col_name):
+    """将列名转换成列索引
+    """
+    col_index = list()
+    for name in col_name:
+        col_index.append(list(X.columns).index(name))
+    return col_index
 
 
 

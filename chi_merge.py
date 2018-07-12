@@ -79,7 +79,8 @@ class ChiMerge(BaseEstimator):
                 self.split_point['less_value_features'][column_index] = tmp_0  # less_feature中有改动的变量值，可能为空, 不含特殊值
 
                 # self._dict_replace(self.X[:, column_index], tmp_0)  # 可能不是从1开始的编码
-
+            else:
+                self.split_point['less_value_features'][column_index] = {}  # 给定一个空字典
             # 如果最小编码不是从1开始，则重新排序
             # col_level_total = np.unique(self.X[:, column])
             # col_level_filter = col_level_total[~np.isin(col_level_total, self.special_value)]
@@ -130,16 +131,18 @@ class ChiMerge(BaseEstimator):
         col_levels = np.unique(tmp_col)
         col_counts = len(col_levels)
 
-        if col_counts >= init_bins:  # 等频划分
+        if col_counts >= init_bins:  # 等频划分,返回的tmp_col从1开始
             tmp_col, split_point = frequency_cut(tmp_col, init_bins)
 
         else:  # 每个值为一个组
             split_point = list(col_levels)[:-1]
             replace_dict = {col_levels[i]: i + 1 for i in range(col_counts)}
             self._dict_replace(tmp_col, replace_dict)  # tmp_col为从1开始的组
+            if tmp_col.dtype == float:
+                tmp_col = tmp_col.astype(int)
 
         # 求出每组的总样本数与坏样本数
-        #步骤二：建立循环，不断合并最优的相邻两个组别，直到：
+        # 步骤二：建立循环，不断合并最优的相邻两个组别，直到：
         # 1，最终分裂出来的分箱数<＝预设的最大分箱数
         # 2，每箱的占比不低于预设值（可选）
         # 3，每箱同时包含好坏样本
@@ -153,6 +156,7 @@ class ChiMerge(BaseEstimator):
             tmp_col, split_point = self._combine(combine_bin, tmp_col, split_point)
 
         # 检查是否有箱没有好或者坏样本。如果有，需要跟相邻的箱进行合并，直到每箱同时包含好坏样本,依据卡方值最小合并
+
         tmp_col, split_point = self._check_bad_rate(tmp_col, tmp_target, split_point, bad_target=bad_target)
 
         # 需要检查分箱后的最小占比
@@ -163,6 +167,7 @@ class ChiMerge(BaseEstimator):
             if not self._check_monotone(tmp_col, tmp_target, bad_target=bad_target):
                 self._continuous_merge(col_index=col_index, special_value=special_value, bad_target=bad_target,
                                        max_bins=max_bins-1, min_bin_pnt=min_bin_pnt, init_bins=init_bins, monotone=monotone)
+
         # 不需要处理特殊值，因为该方法只需返回split_point
         # # 增加特殊值的箱,检查该列是否有特殊值
         # if special_bool.any():
@@ -240,7 +245,7 @@ class ChiMerge(BaseEstimator):
                 else:
                     col, split_point = self._combine(tmp_bin, column, split_point)
             # 递归
-            self._check_bad_rate(col, y, split_point, bad_target=bad_target)
+            self._check_bad_rate(col, y, split_point=split_point, bad_target=bad_target)
         return column, split_point
 
     def _combine(self, combine_bin, column, split_point):
@@ -249,6 +254,7 @@ class ChiMerge(BaseEstimator):
         """
         if combine_bin == max(column):
             raise ValueError('combine_bin equal to max bin')
+        # 确保合并和组别有序排列
         combine_replace = {bin_count: bin_count - 1 for bin_count in range(combine_bin + 1, len(split_point) + 2)}
         self._dict_replace(column, combine_replace)  # 更新tmp_col
         split_point.pop(combine_bin - 1)
@@ -259,8 +265,9 @@ class ChiMerge(BaseEstimator):
         """
         根据k-v来替换col中的value,缺失值不需要放入
         """
+        col = column.copy()
         for k, v in k_v.items():
-            column[column == k] = v
+            column[col == k] = v
 
     # 对连续型变量进行分箱，包括（ii）中的变量
     def _train_bin(self):

@@ -1,18 +1,27 @@
 # __Author__:Zcc
 from chi_merge import ChiMerge
-import time
-import numpy as np
+from util import convert_col_index
+import pandas as pd
 
-start_time = time.time()
-# chi = ChiMerge(num_features=list(range(15)), cat_features=list(range(15, 30)))
-#
-# X = np.arange(6000000).reshape(200000, 30)
-# y = np.random.randint(0, 2, size=200000)
-#
-# chi.fit(X, y)
-# X_result = chi.transform(X)
-# print(X_result)
-#
-time.sleep(1)
-print(time.time()-start_time)
+X = pd.read_csv('X.csv')
+y = pd.read_csv('y.csv', header=None)
+num_features = ['int_rate', 'emp_length', 'annual_inc', 'dti', 'delinq_2yrs', 'earliest_cr_to_app', 'inq_last_6mths',
+                'mths_since_last_record', 'mths_since_last_delinq', 'open_acc', 'pub_rec', 'total_acc', 'limit_income']
+
+cat_features = ['home_ownership', 'verification_status', 'desc', 'purpose', 'zip_code', 'addr_state', 'pub_rec_bankruptcies']
+num_feature_index = convert_col_index(X, num_features)
+cat_features_index = convert_col_index(X, cat_features)
+cm = ChiMerge(num_features=num_feature_index, cat_features=cat_features_index, special_value=-1, max_bin=20)
+
+cm.fit(X, y)
+X_merge = cm.transform(X)
+
+
+
+
+
+
+
+
+
 
