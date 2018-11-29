@@ -1,2 +1,5 @@
 .idea/
 *.pyc
+qzz_test.py
+qzz.ipynb
+.ipynb_checkpoints

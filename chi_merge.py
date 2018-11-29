@@ -147,26 +147,14 @@ class ChiMerge(BaseEstimator):
         # 2，每箱的占比不低于预设值（可选）
         # 3，每箱同时包含好坏样本
         # 如果有特殊属性，那么最终分裂出来的分箱数＝预设的最大分箱数－特殊属性的个数
-        while len(split_point)+1 > max_bins:  # 当前箱数大于预设的箱数
-            chi = []
-            for index in range(1, len(split_point)+1):
-                chi.append(chi2(tmp_target[tmp_col == index], tmp_target[tmp_col == index+1]))
-            combine_bin = chi.index(min(chi))+1  # 合并的组（combin_bin, combin_bin+1）
-            # tmp_col从1开始重新编码,split_point更新
-            tmp_col, split_point = self._combine(combine_bin, tmp_col, split_point)
-
-        # 检查是否有箱没有好或者坏样本。如果有，需要跟相邻的箱进行合并，直到每箱同时包含好坏样本,依据卡方值最小合并
-
-        tmp_col, split_point = self._check_bad_rate(tmp_col, tmp_target, split_point, bad_target=bad_target)
-
-        # 需要检查分箱后的最小占比
-        tmp_col, split_point = self._check_min_bin(tmp_col, tmp_target, split_point, min_bin_pnt=min_bin_pnt)
-
+        tmp_col, split_point = self._merge_process(tmp_col, split_point, max_bins, tmp_target, bad_target, min_bin_pnt)
         # 检查该列分箱后bad_rate是否单调,选择性检查,不单调就减少max_bin再分箱
         if monotone:
-            if not self._check_monotone(tmp_col, tmp_target, bad_target=bad_target):
-                self._continuous_merge(col_index=col_index, special_value=special_value, bad_target=bad_target,
-                                       max_bins=max_bins-1, min_bin_pnt=min_bin_pnt, init_bins=init_bins, monotone=monotone)
+            tmp_bin = max_bins
+            while not self._check_monotone(tmp_col, tmp_target, bad_target=bad_target):
+                tmp_bin = tmp_bin - 1
+                tmp_col, split_point = self._merge_process(column=tmp_col, split_point=split_point, max_bins=tmp_bin,
+                                                           target=tmp_target, bad_target=bad_target, min_bin_pnt=min_bin_pnt)
 
         # 不需要处理特殊值，因为该方法只需返回split_point
         # # 增加特殊值的箱,检查该列是否有特殊值
@@ -179,11 +167,30 @@ class ChiMerge(BaseEstimator):
         # else:
         return split_point
 
+    def _merge_process(self, column, split_point, max_bins, target, bad_target, min_bin_pnt):
+
+        while len(split_point) + 1 > max_bins:  # 当前箱数大于预设的箱数
+            chi = []
+            for index in range(1, len(split_point) + 1):
+                chi.append(chi2(target[column == index], target[column == index + 1]))
+            combine_bin = chi.index(min(chi)) + 1  # 合并的组（combin_bin, combin_bin+1）
+            # tmp_col从1开始重新编码,split_point更新
+            column, split_point = self._combine(combine_bin, column, split_point)
+
+        # 检查是否有箱没有好或者坏样本。如果有，需要跟相邻的箱进行合并，直到每箱同时包含好坏样本,依据卡方值最小合并
+
+        column, split_point = self._check_bad_rate(column, target, split_point, bad_target=bad_target)
+
+        # 需要检查分箱后的最小占比
+        column, split_point = self._check_min_bin(column, target, split_point, min_bin_pnt=min_bin_pnt)
+
+        return column, split_point
+
     def _check_monotone(self, column, y, bad_target=1):
         """
         :return True 单调，False不单调
         """
-        if max(column) == 2:
+        if max(column) in (1, 2):
             return True
         else:
             value_bad_rate = self._bin_bad_rate(column, y, bad_target=bad_target)
@@ -195,57 +202,71 @@ class ChiMerge(BaseEstimator):
                     return False
             return True
 
+    @staticmethod
+    def _min_bin_pct(column):
+        v, c = np.unique(column, return_counts=True)
+        min_bin = v[c.argmin()]  # 占比最小的箱
+        min_bin_act_pct = min(c / column.shape[0])
+        return min_bin, min_bin_act_pct
+
     def _check_min_bin(self, column, y, split_point, min_bin_pnt):
         """
         检查要求的最小箱比例是否小于实际最小箱比例，合并
         """
-        v, c = np.unique(column, return_counts=True)
-        min_bin = v[c.argmin()]  # 占比最小的箱
-        min_bin_act_pct = min(c / column.shape[0])
-        if min_bin_pnt > min_bin_act_pct:
+        min_bin, min_bin_act_pct = self._min_bin_pct(column)
+        while min_bin_pnt > min_bin_act_pct:
 
-            if len(split_point) == 1:  # 只有2组时不需要合并
+            if len(split_point) in (0, 1):  # 只有2组或1组不需要合并
                 return column, split_point
             elif min_bin == 1:
                 # 占比最小的箱是第一箱，第一箱和第二箱合并
-                col, split_point = self._combine(1, column, split_point)
+                column, split_point = self._combine(1, column, split_point)
             elif min_bin == max(column):
                 # 最后一箱和前一箱合并
-                col, split_point = self._combine(max(column) - 1, column, split_point)
+                column, split_point = self._combine(max(column) - 1, column, split_point)
             else:
                 # 如果是中间的某一箱，则需要和前后中的一个箱进行合并，依据是较小的卡方值
                 if chi2(y[column == min_bin], y[column == min_bin - 1]) <= chi2(y[column == min_bin], y[column == min_bin + 1]):
-                    col, split_point = self._combine(min_bin - 1, column, split_point)
+                    column, split_point = self._combine(min_bin - 1, column, split_point)
                 else:
-                    col, split_point = self._combine(min_bin, column, split_point)
+                    column, split_point = self._combine(min_bin, column, split_point)
+
+            min_bin, min_bin_act_pct = self._min_bin_pct(column)
+
             # 递归
-            self._check_min_bin(col, y, split_point, min_bin_pnt)
+            # self._check_min_bin(column, y, split_point, min_bin_pnt)
         return column, split_point
 
     def _check_bad_rate(self, column, y, split_point, bad_target=1):
         """返回tmp_col和split_point"""
         value_bad_rate = self._bin_bad_rate(column, y, bad_target=bad_target)
-        if max(value_bad_rate.values()) == 1. or min(value_bad_rate.values()) == 0.:
-            if len(split_point) == 1:  # 只有2组时该分箱完全区分target，需要检查特征
-                raise ValueError('feature error')
+        while max(value_bad_rate.values()) == 1. or min(value_bad_rate.values()) == 0.:
+
+            if len(split_point) in (0, 1):  # 只有2组时还有某一箱bad_rate为0或1，则合并为1箱,split_point=[]
+                split_point = []
+                column = np.ones(column.shape[0], dtype=int)
+                return column, split_point
+                # raise ValueError('feature error')
                 # 递归检查
             elif np.isin(value_bad_rate[1], [1., 0.]):
                 # 第一箱的bad_rate为1或0和第二箱合并
-                col, split_point = self._combine(1, column, split_point)
+                column, split_point = self._combine(1, column, split_point)
             elif np.isin(value_bad_rate[max(column)], [1., 0.]):
                 # 最后一箱和前一箱合并
-                col, split_point = self._combine(max(column)-1, column, split_point)
+                column, split_point = self._combine(max(column)-1, column, split_point)
             else:
                 # 如果是中间的某一箱，则需要和前后中的一个箱进行合并，依据是较小的卡方值
                 # 找出中间的哪一箱为bad_rate为0,箱数以第一次输入的col和split_point为准
                 # 找到中间第一个bad_rate为0的箱 tmp_bin
                 tmp_bin = [k for k, v in value_bad_rate.items() if v in [0., 1.]][0]
                 if chi2(y[column == tmp_bin], y[column == tmp_bin-1]) <= chi2(y[column == tmp_bin], y[column == tmp_bin+1]):
-                    col, split_point = self._combine(tmp_bin-1, column, split_point)
+                    column, split_point = self._combine(tmp_bin-1, column, split_point)
                 else:
-                    col, split_point = self._combine(tmp_bin, column, split_point)
+                    column, split_point = self._combine(tmp_bin, column, split_point)
+
+            value_bad_rate = self._bin_bad_rate(column, y, bad_target=bad_target)
             # 递归
-            self._check_bad_rate(col, y, split_point=split_point, bad_target=bad_target)
+            # self._check_bad_rate(column=col, y=y, split_point=split_point, col_index=col_index, bad_target=bad_target)
         return column, split_point
 
     def _combine(self, combine_bin, column, split_point):
@@ -290,8 +311,12 @@ class ChiMerge(BaseEstimator):
         """
         给定值返回对应的箱
         """
+        if split_point == []:
+            return 1
+
         if not isinstance(split_point, np.ndarray):
             split_point = np.array(split_point)
+
         if value > split_point[-1]:
             return len(split_point) + 1
         else:
